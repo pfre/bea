@@ -1,0 +1,279 @@
+
+=============================================================================
+#### Summary ################################################################
+=============================================================================
+
+
+For the purpose of measuring the scanning accuracy, we assume all 10 virus
+files need to be detected, and no other files should be detected.
+
+Even though Bea detects all 10 virus files with some options, those options
+lead to an increased rate of false positives (read more about this bellow).
+For fairness, the results are shown for the same chosen command-line options
+(read more about this bellow).
+
+
+			Correct D.   False Pos.     Trust  Success
+Bea:			 9 (82%)        4 (0.07%)   2.00   1.64
+ClamAV:			 0  (0%)        0 (0%)      0.00   0
+Perl scanner:		 3 (27%)       61 (1.03%)   0.05   0.014
+Regular expression 1:	 4 (36%)        0 (0%)      3.00   1.08
+Regular expression 2:	 9 (82%)      171 (2.89%)   0.05   0.041
+Total ".php" files:	11           5919
+
+Column "Correct D." stands for "Correct Detections".
+Column "False Pos." stands for "False Positives".
+Column "Trust" lists how many correct detections are listed per each false
+positive (1 if there are no false positives), and represent a measure of
+trust a user will have on each software's ability to find viruses (the higher
+this number is, the better).
+Column "Success" lists is the product between Trust and Correct Detections,
+and intends to be a measure of the success of each software in finding
+viruses without false positives.
+
+
+=============================================================================
+#### Results for Bea ########################################################
+=============================================================================
+
+
+Results of running
+	./bea-debug -XWOqcr test/
+
+Note that this command-line disables some scanning:
+
+	-X disables scanning for external program execution with external
+	   provided data.
+	   Many of the PHP applications in the corpus do this to circumvent
+	   PHP's limitations or server protections: spell checking user
+	   input, using command-line CURL instead for PHP's CURL functions
+	   to communicate with credit card payment processing gateways,
+	   using command-line Sendmail to send form submission results
+	   (PHPMailer), calling command-line "gzip"/"zip" utilities to
+	   compress data, etc.
+
+	-W disables scanning for suspicious open/write with external provided
+	   data.
+	   PHP applications in general do this for very valid reasons, as
+	   they take user input and save it in files or databases for later
+	   processing or logging.
+
+	-O disables scanning for suspicious variable/code obfuscation.
+	   This is an overzealous alert for important situations where Bea
+	   feels the code is trying to take advantage of its limitations.
+	   This is reported when a function is defined after being used and
+	   returns external data, or when any of the following functions
+	   are used:
+		import_request_variables
+		extract
+		bcompiler_load_exe
+		bcompiler_load
+		bcompiler_read
+		apc_fetch
+		apc_load_constants
+
+
+Correct detections
+-----------------------------------------------------------------------------
+
+_virus-samples/*
+
+	Multiple detections.
+	These are correct as these are real-world virus samples.
+	See _virus-samples/read.txt for more details on these files.
+
+
+joomla-1.5.25/libraries/phpxmlrpc/xmlrpc_wrappers.php
+
+	Detected suspicious eval() at line 380.
+	This is correct, if this file is taken out of context of other files.
+	Line 380 reads roughly:
+
+		eval( $code.'$allOK=1;' )
+
+	$code gets its value from constants and indirectly from $innercode.
+	Even though $innercode is fairly safe, in line 327 gets its value
+	from a string that includes references to several variables,
+	including $GLOBALS['xmlrpcerr'] and $GLOBALS['xmlrpcstr'], neither
+	of which is defined in this file. This makes this variable (and then
+	$code) marked as prone to external data.
+	This file was accounted as a false positive in the summary, above,
+	though.
+
+
+False positives
+-----------------------------------------------------------------------------
+
+fantastico/functions/others.php
+
+	Detected socket connection to external address at line 984.
+	This is a false positive, due to a limitation in Bea.
+	Line 984 reads roughly:
+
+		fsockopen( $GLOBALS['Public_Settings'], ... )
+
+	However, $GLOBALS['Public_Settings'] is first set in line 1084.
+	Because Bea does not backtrack, and because in line 984
+	$GLOBALS['Public_Settings'] was not yet set, it marks this variable
+	as prone to external data, hence the false positive.
+
+
+oscommerce-2.3.1/catalog/admin/modules.php
+
+	Detected suspicious eval() at line 232.
+	This is a false positive, due to a limitation in Bea.
+	Line 232 reads roughly:
+	
+		eval(... . $value[...] . ... $key ... );
+
+	Both $value and $key take their value from $mInfo->keys, and $mInfo
+	is created on line 167 as "new objectInfo($module_info)".
+	Class "objectInfo"is defined in file
+		oscommerce-2.3.1/catalog/admin/includes/classes/object_info.php
+	and this code demonstrated that the class dynamically creates
+	its properties froman array passed in its constructor. Bea cannot
+	currently see this object creation, and it won't support dynamically
+	crated properties in the foreseeable future.
+	At first glance, this class and the $module_info array passed to it
+	seem to actually be safe, so this is a false positive.
+
+
+oscommerce-2.3.1/catalog/includes/modules/header_tags/ht_mailchimp_360/MCAPI.class.php
+
+	Detected socket connection to external address at line 1603.
+	This is a false positive, due to the same limitation in Bea as
+	described above.
+	Line 1603 reads roughly:
+	
+		fsockopen( "ssl://".$host, ... )
+
+	$host gets its value from constants and indirectly from $this->api_key
+	and $this->apiUrl.
+	Even though $this->apiUrl is fairly safe, $this->api_key in line 44
+	gets its value from $GLOBALS["mc_api_key"], just before this global
+	variable is set in line 46. Because Bea does not backtrack, this
+	variable (and then $host) are marked as prone to external data.
+
+
+
+=============================================================================
+#### Results for ClamAV #####################################################
+=============================================================================
+
+
+Results of running ClamAV (virus definitons dated 2012-02-29) on folder
+"test".
+
+
+Correct detections
+-----------------------------------------------------------------------------
+
+None.
+
+
+False positives
+-----------------------------------------------------------------------------
+
+None.
+
+
+
+=============================================================================
+#### Results for Perl scanner ###############################################
+=============================================================================
+
+
+Results of running
+	./scanner.pl test/
+
+
+Correct detections
+-----------------------------------------------------------------------------
+
+_virus-samples/vir3-de-obfuscated-de-obfuscated.php
+_virus-samples/vir3-decoded-decoded.php
+_virus-samples/vir4.php
+	Missing several files, especially the "not-decoded" and "obfuscated"
+	files that are the actual versions that are online:
+		vir1-de-obfuscated.php
+		vir2.php
+		vir3.php
+
+
+False positives
+-----------------------------------------------------------------------------
+
+A total of 61 files.
+
+
+
+=============================================================================
+#### Results for regular expression 1 #######################################
+=============================================================================
+
+
+Results of running
+	find test -name "*.php" -exec egrep -l '(eval[[:space:]]*\(.+[a-zA-Z0-9/]{20})|([a-zA-Z0-9/]{20}.+eval[[:space:]]*\()' {} \;
+	find test -name "*.php" -exec egrep -l '\|<SUBJ>\(\.\*\)</SUBJ>\|imsU' {} \;
+	find test -name "*.php" -exec egrep -l 'mail\(\$ToEmail' {} \;
+
+There are no PHP files with extensions other than ".php" in the test folder.
+These commands were fine-tuned for particular versions of viruses, so they
+"cheat" a bit. They would very likely (with the possible exception of the
+first command) not find variations of the found viruses.
+
+The first command is meant for find PHP files using the eval() function with
+a Base64-encoded string nearby (to avoid false positives).
+The second command looks for _virus-samples/vir1-de-obfuscated.php.
+The third command looks for _virus-samples/vir2.php
+
+
+Correct detections
+-----------------------------------------------------------------------------
+
+_virus-samples/vir4.php
+_virus-samples/vir1-de-obfuscated.php
+_virus-samples/vir2.php
+	This is correct.
+
+
+False positives
+-----------------------------------------------------------------------------
+
+None.
+
+
+=============================================================================
+#### Results for regular expression 2 #######################################
+=============================================================================
+
+
+Results of running
+	find test -name "*.php" -exec egrep -l '(eval|socket_connect|fsockopen|mail)[[:space:]]*\(' {} \;
+
+There are no PHP files with extensions other than ".php" in the test folder.
+This command looks for the use of some "dangerous" PHP functions. Because it
+cannot see how they are being used, it generates many false positives (like
+the similar Perl script).
+
+
+Correct detections
+-----------------------------------------------------------------------------
+
+_virus-samples/vir1-de-obfuscated.php
+_virus-samples/vir1.php
+_virus-samples/vir2.php
+_virus-samples/vir3-de-obfuscated-de-obfuscated.php
+_virus-samples/vir3-de-obfuscated.php
+_virus-samples/vir3-decoded-decoded.php
+_virus-samples/vir3-decoded.php
+_virus-samples/vir3.php
+_virus-samples/vir4.php
+	Finds all viruses. The problem is the amount of false positives.
+
+
+False positives
+-----------------------------------------------------------------------------
+
+A total of 171 files.
+
